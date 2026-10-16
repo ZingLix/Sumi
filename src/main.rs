@@ -1,5 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
-use sumi::{auth::Auth, server, store::Store};
+use sumi::{auth::Auth, config::PublicUrl, server, store::Store};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -33,18 +33,37 @@ async fn main() -> anyhow::Result<()> {
     store.verify_runtime_role().await?;
     let jwks =
         serde_json::from_slice(&tokio::fs::read(std::env::var("SUMI_OAUTH_JWKS_FILE")?).await?)?;
+    let public_url = PublicUrl::from_env()?;
     let auth = Auth::new(
         std::env::var("SUMI_OAUTH_ISSUER")?,
-        std::env::var("SUMI_RESOURCE_URL")?,
+        public_url.resource_url.clone(),
         jwks,
     )?;
     let bind = std::env::var("SUMI_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    tracing::info!(address=%bind,"Sumi MCP listening; terminate HTTPS at the reverse proxy");
+    tracing::info!(address=%bind, resource=%public_url.resource_url,"Sumi MCP listening; terminate HTTPS at the reverse proxy");
     axum::serve(listener, server::router(store, auth))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = terminate.recv() => {},
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Cannot install SIGTERM handler");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }

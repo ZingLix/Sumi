@@ -50,3 +50,35 @@ jobs:
         with:
           toolchain: '1.88.0'
       - run: cargo check --all-targets --locked
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SUMI_DB_ADMIN_PASSWORD: sumi-ci
+      SUMI_DB_APP_PASSWORD: sumi-ci
+      SUMI_BASE_URL: http://127.0.0.1:8080/self-hosted/sumi
+      SUMI_OAUTH_ISSUER: https://auth.sumi.test/
+      SUMI_OAUTH_JWKS_HOST_FILE: ./tests/fixtures/jwks.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker compose config --quiet
+      - run: docker compose up -d --build sumi
+      - name: Verify prefixed public URL and OAuth discovery
+        run: |
+          curl --fail --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/self-hosted/sumi/healthz
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --request POST http://127.0.0.1:8080/self-hosted/sumi/mcp)" = 401
+          curl --fail --silent http://127.0.0.1:8080/.well-known/oauth-protected-resource/self-hosted/sumi/mcp | python3 -c 'import json,sys; assert json.load(sys.stdin)["resource"] == "http://127.0.0.1:8080/self-hosted/sumi/mcp"'
+      - name: Verify authenticated MCP writes and idempotency
+        run: python3 scripts/smoke-deployment.py --state-file .local/deployment-smoke.json
+      - name: Restart the stack with its existing database volume
+        run: |
+          docker compose down
+          docker compose up -d sumi
+      - name: Verify persisted ledger after restart
+        run: python3 scripts/smoke-deployment.py --state-file .local/deployment-smoke.json --verify-only
+      - if: failure()
+        run: docker compose logs --no-color
+      - if: always()
+        run: docker compose down --volumes

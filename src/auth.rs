@@ -1,4 +1,7 @@
-use crate::error::{Error, Result};
+use crate::{
+    config::{PublicUrl, validate_oauth_url},
+    error::{Error, Result},
+};
 use axum::{
     extract::{Request, State},
     http::{StatusCode, header},
@@ -40,10 +43,8 @@ impl Principal {
 #[derive(Clone)]
 pub struct Auth {
     issuer: String,
-    resource: String,
+    public_url: PublicUrl,
     jwks: Arc<JwkSet>,
-    allowed_origin: String,
-    authority: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -59,38 +60,16 @@ struct Claims {
 impl Auth {
     pub fn new(issuer: String, resource: String, jwks: JwkSet) -> anyhow::Result<Self> {
         let issuer_url = url::Url::parse(&issuer)?;
-        let resource_url = url::Url::parse(&resource)?;
-        anyhow::ensure!(
-            resource_url.path() == "/mcp",
-            "SUMI_RESOURCE_URL must point to /mcp"
-        );
-        for url in [&issuer_url, &resource_url] {
-            let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-            anyhow::ensure!(
-                url.scheme() == "https" || (url.scheme() == "http" && loopback),
-                "OAuth URLs must use HTTPS (loopback HTTP is allowed for development)"
-            );
-            anyhow::ensure!(
-                url.username().is_empty()
-                    && url.password().is_none()
-                    && url.fragment().is_none()
-                    && url.query().is_none(),
-                "OAuth URLs cannot contain credentials, query or fragment"
-            );
-        }
+        validate_oauth_url(&issuer_url)?;
+        let public_url = PublicUrl::resolve(None, Some(&resource))?;
         anyhow::ensure!(
             !jwks.keys.is_empty(),
             "JWKS must contain a public signing key"
         );
-        let allowed_origin = resource_url.origin().ascii_serialization();
-        let authority =
-            resource_url[url::Position::BeforeHost..url::Position::AfterPort].to_owned();
         Ok(Self {
             issuer,
-            resource,
+            public_url,
             jwks: Arc::new(jwks),
-            allowed_origin,
-            authority,
         })
     }
     pub fn validate(&self, token: &str) -> anyhow::Result<Principal> {
@@ -136,7 +115,7 @@ impl Auth {
         let key = DecodingKey::from_jwk(jwk)?;
         let mut validation = Validation::new(header.alg);
         validation.set_issuer(&[&self.issuer]);
-        validation.set_audience(&[&self.resource]);
+        validation.set_audience(&[&self.public_url.resource_url]);
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         validation.validate_nbf = true;
         validation.leeway = 30;
@@ -171,14 +150,15 @@ impl Auth {
         })
     }
     pub fn metadata(&self) -> serde_json::Value {
-        json!({"resource":self.resource,"authorization_servers":[self.issuer],"scopes_supported":["sumi:read","sumi:write"],"bearer_methods_supported":["header"]})
+        json!({"resource":self.public_url.resource_url,"authorization_servers":[self.issuer],"scopes_supported":["sumi:read","sumi:write"],"bearer_methods_supported":["header"]})
+    }
+    pub fn public_url(&self) -> &PublicUrl {
+        &self.public_url
     }
     fn challenge(&self) -> String {
-        let url = url::Url::parse(&self.resource).expect("validated URL");
         format!(
-            "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource{}\", scope=\"sumi:read sumi:write\"",
-            url.origin().ascii_serialization(),
-            url.path()
+            "Bearer resource_metadata=\"{}{}\", scope=\"sumi:read sumi:write\"",
+            self.public_url.origin, self.public_url.metadata_path
         )
     }
 }
@@ -188,12 +168,12 @@ pub async fn authenticate(State(auth): State<Auth>, mut request: Request, next: 
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        != Some(auth.authority.as_str())
+        != Some(auth.public_url.authority.as_str())
     {
         return (StatusCode::BAD_REQUEST, "Invalid Host").into_response();
     }
     if let Some(origin) = request.headers().get(header::ORIGIN)
-        && origin.to_str().ok() != Some(auth.allowed_origin.as_str())
+        && origin.to_str().ok() != Some(auth.public_url.origin.as_str())
     {
         return (StatusCode::FORBIDDEN, "Origin is not allowed").into_response();
     }

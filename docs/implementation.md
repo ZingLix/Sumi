@@ -20,18 +20,18 @@ set +a
 cargo run --locked
 ~~~
 
-程序从进程环境读取配置，不自动加载 .env。默认监听 127.0.0.1:8080，MCP 路径固定为 /mcp，/healthz 用于进程存活检查。远程部署由反向代理终止 HTTPS，保留原始 Host 和 Authorization，并支持 Streamable HTTP。服务校验 Host 和存在时的 Origin，不依赖 X-Forwarded-* 确定身份。整体请求体上限 1 MiB，单份归档正文上限 512 KiB，来源及观测批量最多 100 项，交易最多 50 动作，列表默认 50、最多 100 项。业务版本变化使旧游标报 CURSOR_STALE。
+程序从进程环境读取配置，不自动加载 .env。默认监听 127.0.0.1:8080。SUMI_BASE_URL 配置公开访问地址，可带子路径；例如 https://example.com/sumi 对应 MCP 路径 /sumi/mcp。旧 SUMI_RESOURCE_URL 完整地址仍兼容，同时设置时必须一致。/healthz 和相应子路径 /sumi/healthz 用于进程存活检查。远程部署由反向代理终止 HTTPS，保留完整路径、原始 Host 和 Authorization，并支持 Streamable HTTP。服务校验 Host 和存在时的 Origin，不依赖 X-Forwarded-* 确定身份。整体请求体上限 1 MiB，单份归档正文上限 512 KiB，来源及观测批量最多 100 项，交易最多 50 动作，列表默认 50、最多 100 项。业务版本变化使旧游标报 CURSOR_STALE。容器、子路径反代、更新及备份步骤见 [自部署](self-hosting.md)。
 
 ## OAuth
 
 授权服务器由部署方提供，签名公钥从 SUMI_OAUTH_JWKS_FILE 载入。资源服务器不签发令牌，不提供身份绕过模式。公钥文件在启动时读取，轮换后重启服务。
 
 - Header：typ=at+jwt，alg 为 RS256 或 ES256，kid 对应允许验签的公钥。
-- Claims：iss 与 SUMI_OAUTH_ISSUER 一致，aud 包含 SUMI_RESOURCE_URL，具有有效的 sub、client_id、iat、exp 和 scope。存在 nbf 时同样校验，时钟容差 30 秒。
+- Claims：iss 与 SUMI_OAUTH_ISSUER 一致，aud 包含由 SUMI_BASE_URL 推导的完整 MCP URL（或显式 SUMI_RESOURCE_URL），具有有效的 sub、client_id、iat、exp 和 scope。存在 nbf 时同样校验，时钟容差 30 秒。
 - 读取需要 sumi:read，写入需要 sumi:write，通常同时申请两项。资源 URL 必须是客户端访问的完整 HTTPS /mcp URL；本机开发允许 loopback HTTP。
 - 首次 context 初始化个人账本及该客户端授权。实际权限为 JWT scope、当前用户所有权与 authorization_grants 中授权的交集。运维将授权 status 改为 revoked 或将用户 status 改为 disabled 后，后续请求即被拒绝；普通调用不能重新开启已撤销授权。
 
-资源元数据位于 /.well-known/oauth-protected-resource/mcp（另有根路径别名），401 返回对应 WWW-Authenticate challenge。测试目录中的密钥仅用于自动化测试，部署使用授权服务器自己的公钥。
+资源元数据位于 /.well-known/oauth-protected-resource 加完整 MCP 路径，例如 /.well-known/oauth-protected-resource/sumi/mcp（另有根路径别名），401 返回对应 WWW-Authenticate challenge。测试目录中的密钥仅用于自动化测试，部署使用授权服务器自己的公钥。
 
 ## 16 个工具
 

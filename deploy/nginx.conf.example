@@ -1,0 +1,19 @@
+# Merge these locations into your existing HTTPS server block.
+# SUMI_BASE_URL=https://example.com/sumi
+location /sumi/ {
+    # No trailing slash: retain /sumi/ in the upstream request URI.
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+    client_max_body_size 1m;
+}
+location = /.well-known/oauth-protected-resource/sumi/mcp {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $http_host;
+}
+# For a dedicated domain (BASE_URL=https://ledger.example.com), use location /
+# with the same proxy settings. Keep the entire request path.

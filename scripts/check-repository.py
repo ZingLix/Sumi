@@ -14,6 +14,7 @@ PRIVATE_KEY = re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRI
 JWT = re.compile(rb"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 DATABASE_PASSWORD = re.compile(rb"postgres(?:ql)?://[^\s:/@]+:([^\s/@]+)@")
 EXAMPLE_PASSWORDS = {b"password", b"change-me", b"sumi-ci"}
+ENV_REFERENCE = re.compile(rb"\$\{[A-Z_][A-Z0-9_]*(?::\?[^}]*)?\}")
 FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".dump", ".backup", ".db", ".sqlite", ".sqlite3", ".eml", ".mbox"}
 FORBIDDEN_NAMES = {"email.json", "ledger-export.json", "mcp-transcript.json", ".DS_Store"}
 
@@ -58,7 +59,10 @@ def main():
             issues.append((name, "unapproved private key content"))
         if JWT.search(content):
             issues.append((name, "literal JWT; generate test tokens at runtime"))
-        if any(match.group(1) not in EXAMPLE_PASSWORDS for match in DATABASE_PASSWORD.finditer(content)):
+        if any(
+            match.group(1) not in EXAMPLE_PASSWORDS and not ENV_REFERENCE.fullmatch(match.group(1))
+            for match in DATABASE_PASSWORD.finditer(content)
+        ):
             issues.append((name, "database URL contains a non-example password"))
     if issues:
         for name, reason in issues:

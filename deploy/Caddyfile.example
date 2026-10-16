@@ -1,0 +1,19 @@
+# Dedicated domain; SUMI_BASE_URL=https://ledger.example.com
+ledger.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        header_up Host {http.request.hostport}
+        flush_interval -1
+    }
+}
+
+# On an existing site, add these handlers to its existing site block instead.
+# SUMI_BASE_URL=https://example.com/sumi
+# example.com {
+#     @sumi path /sumi/* /.well-known/oauth-protected-resource/sumi/mcp
+#     handle @sumi {
+#         reverse_proxy 127.0.0.1:8080 {
+#             header_up Host {http.request.hostport}
+#             flush_interval -1
+#         }
+#     }
+# }

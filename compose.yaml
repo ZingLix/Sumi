@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sumi
+      POSTGRES_USER: sumi_owner
+      POSTGRES_PASSWORD: ${SUMI_DB_ADMIN_PASSWORD:?required}
+      SUMI_DB_APP_PASSWORD: ${SUMI_DB_APP_PASSWORD:?required}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./deploy/init-runtime-role.sh:/docker-entrypoint-initdb.d/10-runtime-role.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    image: sumi:local
+    build: .
+    command: [migrate]
+    environment:
+      DATABASE_URL: postgres://sumi_owner:${SUMI_DB_ADMIN_PASSWORD:?required}@db:5432/sumi
+    depends_on:
+      db:
+        condition: service_healthy
+  permissions:
+    image: postgres:16
+    entrypoint: [psql]
+    command: [--no-psqlrc, --set, ON_ERROR_STOP=1, --file, /init/grant-runtime.sql]
+    environment:
+      PGHOST: db
+      PGDATABASE: sumi
+      PGUSER: sumi_owner
+      PGPASSWORD: ${SUMI_DB_ADMIN_PASSWORD:?required}
+    volumes:
+      - ./scripts/grant-runtime.sql:/init/grant-runtime.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  sumi:
+    image: sumi:local
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: postgres://sumi_app:${SUMI_DB_APP_PASSWORD:?required}@db:5432/sumi
+      SUMI_BASE_URL: ${SUMI_BASE_URL:?required}
+      SUMI_OAUTH_ISSUER: ${SUMI_OAUTH_ISSUER:?required}
+      SUMI_OAUTH_JWKS_FILE: /run/sumi/public-jwks.json
+      SUMI_BIND: 0.0.0.0:8080
+      RUST_LOG: ${RUST_LOG:-sumi=info,tower_http=info}
+    ports:
+      - 127.0.0.1:${SUMI_PORT:-8080}:8080
+    volumes:
+      - ${SUMI_OAUTH_JWKS_HOST_FILE:?required}:/run/sumi/public-jwks.json:ro
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    depends_on:
+      permissions:
+        condition: service_completed_successfully
+volumes:
+  db_data:

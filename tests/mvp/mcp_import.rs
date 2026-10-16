@@ -63,12 +63,24 @@ impl Client {
 }
 
 pub(super) async fn acceptance(store: &Store) {
+    let resource = "http://127.0.0.1:8080/self-hosted/sumi/mcp";
+    let mut claims = common::claims("http-statement-import");
+    claims["aud"] = json!(resource);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = Client {
-        url: format!("http://{}/mcp", listener.local_addr().unwrap()),
-        token: common::token(&common::claims("http-statement-import")),
+        url: format!(
+            "http://{}/self-hosted/sumi/mcp",
+            listener.local_addr().unwrap()
+        ),
+        token: common::token(&claims),
     };
-    let router = server::router(store.clone(), common::auth());
+    let auth = sumi::auth::Auth::new(
+        "https://auth.sumi.test/".into(),
+        resource.into(),
+        serde_json::from_str(include_str!("../fixtures/jwks.json")).unwrap(),
+    )
+    .unwrap();
+    let router = server::router(store.clone(), auth);
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     client.rpc("initialize", json!({"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"statement-import-acceptance","version":"1"}})).await;
     let tools = client.rpc("tools/list", json!({})).await;

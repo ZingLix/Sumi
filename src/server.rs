@@ -305,27 +305,34 @@ impl ServerHandler for SumiMcp {
 }
 
 pub fn router(store: Store, auth: Auth) -> Router {
+    let public_url = auth.public_url().clone();
     let service = StreamableHttpService::new(
         move || Ok(SumiMcp::new(store.clone())),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
+            .with_allowed_hosts([public_url.authority.clone()])
+            .with_allowed_origins([public_url.origin.clone()])
             .with_stateful_mode(false)
             .with_json_response(true),
     );
     let protected = Router::new()
-        .nest_service("/mcp", service)
+        .nest_service(&public_url.mcp_path, service)
         .layer(middleware::from_fn_with_state(auth.clone(), authenticate));
-    Router::new()
+    let mut router = Router::new()
         .merge(protected)
         .route(
-            "/.well-known/oauth-protected-resource/mcp",
+            &public_url.metadata_path,
             get(|State(auth): State<Auth>| async move { axum::Json(auth.metadata()) }),
         )
         .route(
             "/.well-known/oauth-protected-resource",
             get(|State(auth): State<Auth>| async move { axum::Json(auth.metadata()) }),
         )
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(|| async { "ok" }));
+    if public_url.health_path != "/healthz" {
+        router = router.route(&public_url.health_path, get(|| async { "ok" }));
+    }
+    router
         .with_state(auth)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(TraceLayer::new_for_http())

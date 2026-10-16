@@ -19,6 +19,7 @@ Sumi 是供 Codex 等 AI 操作的个人日常记账服务端。AI 获取邮件�
 PostgreSQL 通过组合外键、强制 RLS、延迟平衡检查和不可变历史保护账目。JWT scope 与保存的个人账本授权取交集，支持运维撤销授权和停用用户。posted、证据支持、对账和导入完整性分别返回，不把资料不足解释为成功。
 
 - [启动、接口示例与实现进度](docs/implementation.md)
+- [自部署：Base URL、Docker Compose、反向代理和更新](docs/self-hosting.md)
 - [开发、提交范围与 GitHub 首次发布](CONTRIBUTING.md)
 - [变更记录](CHANGELOG.md) · [MIT 许可证](LICENSE)
 - 运行本地检查：`cargo fmt --check`、`cargo clippy --all-targets --locked -- -D warnings`、`cargo test --locked`

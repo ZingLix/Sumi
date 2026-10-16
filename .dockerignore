@@ -1,0 +1,10 @@
+# Allow only build inputs; never send local mail, exports, credentials or Git data.
+**
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**
+!migrations/
+!migrations/**
+!LICENSE
+!Dockerfile
